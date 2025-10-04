@@ -1,2 +1,9 @@
-Flask==2.3.3
+# Update package list
+sudo apt update
+
+# Install Python Flask
+pip install Flask Flask-CORS
+
+# Install Bluetooth tools (BlueZ)
+sudo apt install bluezFlask==2.3.3
 Flask-CORS==4.0.0
