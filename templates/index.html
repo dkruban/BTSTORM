@@ -61,6 +61,7 @@ BTStorm - Bluetooth DoS Jammer
                             <input type="text" id="target-name" class="form-control" placeholder="Device Name">
                         </div>
                         
+                        <!-- Attack Buttons -->
                         <div>
                             <button id="attack-btn" class="btn btn-danger" disabled>Start Attack</button>
                             <button id="stop-btn" class="btn btn-warning" style="display: none;">Stop Attack</button>
@@ -88,7 +89,7 @@ BTStorm - Bluetooth DoS Jammer
         let devices = [];
         let statusInterval;
         let currentSessionId;
-        let lastLogCount = 0;
+        let lastLogCount = 0; // To track new logs
 
         function log(message, color = 'green') {
             terminal.innerHTML += `\n[${new Date().toLocaleTimeString()}] <span class="${color}">${message}</span>`;
@@ -119,16 +120,8 @@ BTStorm - Bluetooth DoS Jammer
             scanStatus.textContent = 'Scanning...';
             log('Scanning for Bluetooth devices...', 'cyan');
             
-            fetch('/scan', { method: 'POST', headers: { 'Content-Type': 'application/json' } })
-                .then(async response => {
-                    const contentType = response.headers.get("content-type");
-                    if (!contentType || !contentType.includes("application/json")) {
-                        // If the content type is not JSON, get the text and throw an error
-                        const text = await response.text();
-                        throw new Error(`Server returned non-JSON response. Status: ${response.status}. Content: ${text}`);
-                    }
-                    return response.json();
-                })
+            fetch('/scan', { method: 'POST' })
+                .then(res => res.json())
                 .then(data => {
                     devices = data.devices;
                     deviceList.innerHTML = '';
@@ -144,8 +137,7 @@ BTStorm - Bluetooth DoS Jammer
                     if (!currentSessionId) attackBtn.disabled = false;
                 })
                 .catch(err => {
-                    // This will now log the much more detailed error message
-                    log(`Scan error: ${err.message}`, 'red');
+                    log(`Scan error: ${err}`, 'red');
                     scanStatus.textContent = 'Error';
                 })
                 .finally(() => scanBtn.disabled = false);
@@ -170,34 +162,23 @@ BTStorm - Bluetooth DoS Jammer
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(requestData)
             })
-            .then(async response => {
-                const contentType = response.headers.get("content-type");
-                if (!contentType || !contentType.includes("application/json")) {
-                    const text = await response.text();
-                    throw new Error(`Server returned non-JSON response. Status: ${response.status}. Content: ${text}`);
-                }
-                return response.json();
-            })
+            .then(res => res.json())
             .then(data => {
                 currentSessionId = data.session_id;
                 log(data.message);
-                lastLogCount = 0;
+                lastLogCount = 0; // Reset log count for new attack
 
                 statusInterval = setInterval(() => {
                     fetch(`/attack_status/${currentSessionId}`)
-                        .then(async response => {
-                            const contentType = response.headers.get("content-type");
-                            if (!contentType || !contentType.includes("application/json")) {
-                                const text = await response.text();
-                                throw new Error(`Server returned non-JSON response. Status: ${response.status}. Content: ${text}`);
-                            }
-                            return response.json();
-                        })
+                        .then(res => res.json())
                         .then(statusData => {
                             if (statusData.status === 'success') {
+                                // Display only new logs
                                 const newLogs = statusData.logs.slice(lastLogCount);
                                 newLogs.forEach(logMsg => log(logMsg));
                                 lastLogCount = statusData.logs.length;
+
+                                // If the attack is no longer running, reset the UI
                                 if (!statusData.is_running) {
                                     log("Attack finished.", 'cyan');
                                     resetAttackUI();
@@ -205,13 +186,13 @@ BTStorm - Bluetooth DoS Jammer
                             }
                         })
                         .catch(err => {
-                            log(`Status check error: ${err.message}`, 'red');
+                            log(`Status check error: ${err}`, 'red');
                             resetAttackUI();
                         });
-                }, 500);
+                }, 500); // Poll more frequently for real-time feel
             })
             .catch(err => {
-                log(`Attack error: ${err.message}`, 'red');
+                log(`Attack error: ${err}`, 'red');
                 attackStatus.textContent = 'Error';
                 resetAttackUI();
             });
@@ -224,8 +205,9 @@ BTStorm - Bluetooth DoS Jammer
                 .then(res => res.json())
                 .then(data => {
                     log(data.message, 'yellow');
+                    // The UI will be reset by the status polling loop when it detects the attack has stopped
                 })
-                .catch(err => log(`Stop error: ${err.message}`, 'red'));
+                .catch(err => log(`Stop error: ${err}`, 'red'));
         });
     </script>
 </body>
