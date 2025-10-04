@@ -15,6 +15,7 @@
         .card { background-color: #1a1a1a; border-color: #0f0; }
         .btn-primary { background-color: #0f0; border-color: #0f0; color: #000; }
         .btn-danger { background-color: #f00; border-color: #f00; }
+        .btn-warning { background-color: #ff8c00; border-color: #ff8c00; color: #000; }
         .form-check-input:checked { background-color: #0f0; border-color: #0f0; }
     </style>
 </head>
@@ -59,7 +60,13 @@ BTStorm - Bluetooth DoS Jammer
                             <input type="text" id="target-mac" class="form-control" placeholder="MAC Address">
                             <input type="text" id="target-name" class="form-control" placeholder="Device Name">
                         </div>
-                        <button id="attack-btn" class="btn btn-danger" disabled>Start Attack</button>
+                        
+                        <!-- Attack Buttons -->
+                        <div>
+                            <button id="attack-btn" class="btn btn-danger" disabled>Start Attack</button>
+                            <button id="stop-btn" class="btn btn-warning" style="display: none;">Stop Attack</button>
+                        </div>
+                        
                         <div id="attack-status" class="mt-2"></div>
                     </div>
                 </div>
@@ -71,6 +78,7 @@ BTStorm - Bluetooth DoS Jammer
         const terminal = document.getElementById('terminal-output');
         const scanBtn = document.getElementById('scan-btn');
         const attackBtn = document.getElementById('attack-btn');
+        const stopBtn = document.getElementById('stop-btn');
         const deviceList = document.getElementById('device-list');
         const scanStatus = document.getElementById('scan-status');
         const attackStatus = document.getElementById('attack-status');
@@ -80,19 +88,31 @@ BTStorm - Bluetooth DoS Jammer
         
         let devices = [];
         let statusInterval;
+        let currentSessionId;
+        let lastLogCount = 0; // To track new logs
 
         function log(message, color = 'green') {
             terminal.innerHTML += `\n[${new Date().toLocaleTimeString()}] <span class="${color}">${message}</span>`;
             terminal.scrollTop = terminal.scrollHeight;
         }
 
+        function resetAttackUI() {
+            attackBtn.disabled = devices.length === 0;
+            attackBtn.style.display = 'inline-block';
+            stopBtn.style.display = 'none';
+            attackStatus.textContent = '';
+            clearInterval(statusInterval);
+            currentSessionId = null;
+            lastLogCount = 0;
+        }
+
         attackAllRadio.addEventListener('change', () => {
             singleInputs.style.display = 'none';
-            attackBtn.disabled = devices.length === 0;
+            if (!currentSessionId) attackBtn.disabled = devices.length === 0;
         });
         attackSingleRadio.addEventListener('change', () => {
             singleInputs.style.display = 'flex';
-            attackBtn.disabled = false;
+            if (!currentSessionId) attackBtn.disabled = false;
         });
 
         scanBtn.addEventListener('click', () => {
@@ -114,7 +134,7 @@ BTStorm - Bluetooth DoS Jammer
                     });
                     scanStatus.textContent = data.message;
                     log(data.message);
-                    attackBtn.disabled = false;
+                    if (!currentSessionId) attackBtn.disabled = false;
                 })
                 .catch(err => {
                     log(`Scan error: ${err}`, 'red');
@@ -124,8 +144,9 @@ BTStorm - Bluetooth DoS Jammer
         });
 
         attackBtn.addEventListener('click', () => {
-            if (statusInterval) clearInterval(statusInterval);
-            attackBtn.disabled = true;
+            attackBtn.style.display = 'none';
+            stopBtn.style.display = 'inline-block';
+            stopBtn.disabled = false;
             attackStatus.textContent = 'Attack in progress...';
 
             let requestData = { type: attackAllRadio.checked ? 'all' : 'single' };
@@ -143,25 +164,50 @@ BTStorm - Bluetooth DoS Jammer
             })
             .then(res => res.json())
             .then(data => {
+                currentSessionId = data.session_id;
                 log(data.message);
+                lastLogCount = 0; // Reset log count for new attack
+
                 statusInterval = setInterval(() => {
-                    fetch(`/attack_status/${data.session_id}`)
+                    fetch(`/attack_status/${currentSessionId}`)
                         .then(res => res.json())
                         .then(statusData => {
-                            statusData.logs.forEach(logMsg => log(logMsg));
-                            if (statusData.logs.length > 0) {
-                                clearInterval(statusInterval);
-                                attackStatus.textContent = 'Attack Completed';
-                                attackBtn.disabled = false;
+                            if (statusData.status === 'success') {
+                                // Display only new logs
+                                const newLogs = statusData.logs.slice(lastLogCount);
+                                newLogs.forEach(logMsg => log(logMsg));
+                                lastLogCount = statusData.logs.length;
+
+                                // If the attack is no longer running, reset the UI
+                                if (!statusData.is_running) {
+                                    log("Attack finished.", 'cyan');
+                                    resetAttackUI();
+                                }
                             }
+                        })
+                        .catch(err => {
+                            log(`Status check error: ${err}`, 'red');
+                            resetAttackUI();
                         });
-                }, 1000);
+                }, 500); // Poll more frequently for real-time feel
             })
             .catch(err => {
                 log(`Attack error: ${err}`, 'red');
                 attackStatus.textContent = 'Error';
-                attackBtn.disabled = false;
+                resetAttackUI();
             });
+        });
+
+        stopBtn.addEventListener('click', () => {
+            stopBtn.disabled = true;
+            stopBtn.textContent = 'Stopping...';
+            fetch(`/stop_attack/${currentSessionId}`, { method: 'POST' })
+                .then(res => res.json())
+                .then(data => {
+                    log(data.message, 'yellow');
+                    // The UI will be reset by the status polling loop when it detects the attack has stopped
+                })
+                .catch(err => log(`Stop error: ${err}`, 'red'));
         });
     </script>
 </body>
