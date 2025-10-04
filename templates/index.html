@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>BTStorm - Web Edition</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body { background-color: #000; color: #0f0; font-family: 'Courier New', monospace; }
+        .terminal { background-color: #111; border: 1px solid #0f0; padding: 15px; height: 400px; overflow-y: auto; white-space: pre-wrap; }
+        .banner { color: #00ffff; white-space: pre; text-align: center; }
+        .cyan { color: #00ffff; }
+        .green { color: #00ff00; }
+        .red { color: #ff0000; }
+        .yellow { color: #ffff00; }
+        .card { background-color: #1a1a1a; border-color: #0f0; }
+        .btn-primary { background-color: #0f0; border-color: #0f0; color: #000; }
+        .btn-danger { background-color: #f00; border-color: #f00; }
+        .form-check-input:checked { background-color: #0f0; border-color: #0f0; }
+    </style>
+</head>
+<body>
+    <div class="container mt-4">
+        <div class="banner">{{ banner }}</div>
+        <div class="text-center cyan mb-4">
+            {% for line in credits %}<div>{{ line }}</div>{% endfor %}
+        </div>
+
+        <div class="terminal" id="terminal-output">
+BTStorm - Bluetooth DoS Jammer
+===========================
+[*] Initializing...
+[*] Ready to scan for devices
+        </div>
+
+        <div class="row mt-4">
+            <div class="col-md-6">
+                <div class="card text-white">
+                    <div class="card-header"><h5>Device Scanner</h5></div>
+                    <div class="card-body">
+                        <button id="scan-btn" class="btn btn-primary">Scan for Devices</button>
+                        <div id="scan-status" class="mt-2"></div>
+                        <ul id="device-list" class="list-group mt-3"></ul>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="card text-white">
+                    <div class="card-header"><h5>Attack Controls</h5></div>
+                    <div class="card-body">
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="attackType" id="attackAll" value="all" checked>
+                            <label class="form-check-label" for="attackAll">Attack All Devices</label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="attackType" id="attackSingle" value="single">
+                            <label class="form-check-label" for="attackSingle">Attack Single Device</label>
+                        </div>
+                        <div id="single-inputs" class="input-group mt-3 mb-3" style="display:none;">
+                            <input type="text" id="target-mac" class="form-control" placeholder="MAC Address">
+                            <input type="text" id="target-name" class="form-control" placeholder="Device Name">
+                        </div>
+                        <button id="attack-btn" class="btn btn-danger" disabled>Start Attack</button>
+                        <div id="attack-status" class="mt-2"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const terminal = document.getElementById('terminal-output');
+        const scanBtn = document.getElementById('scan-btn');
+        const attackBtn = document.getElementById('attack-btn');
+        const deviceList = document.getElementById('device-list');
+        const scanStatus = document.getElementById('scan-status');
+        const attackStatus = document.getElementById('attack-status');
+        const attackAllRadio = document.getElementById('attackAll');
+        const attackSingleRadio = document.getElementById('attackSingle');
+        const singleInputs = document.getElementById('single-inputs');
+        
+        let devices = [];
+        let statusInterval;
+
+        function log(message, color = 'green') {
+            terminal.innerHTML += `\n[${new Date().toLocaleTimeString()}] <span class="${color}">${message}</span>`;
+            terminal.scrollTop = terminal.scrollHeight;
+        }
+
+        attackAllRadio.addEventListener('change', () => {
+            singleInputs.style.display = 'none';
+            attackBtn.disabled = devices.length === 0;
+        });
+        attackSingleRadio.addEventListener('change', () => {
+            singleInputs.style.display = 'flex';
+            attackBtn.disabled = false;
+        });
+
+        scanBtn.addEventListener('click', () => {
+            scanBtn.disabled = true;
+            scanStatus.textContent = 'Scanning...';
+            log('Scanning for Bluetooth devices...', 'cyan');
+            
+            fetch('/scan', { method: 'POST' })
+                .then(res => res.json())
+                .then(data => {
+                    devices = data.devices;
+                    deviceList.innerHTML = '';
+                    devices.forEach((d, i) => {
+                        deviceList.innerHTML += `
+                            <li class="list-group-item bg-dark text-light">
+                                <input class="form-check-input me-2" type="checkbox" value="${i}" checked>
+                                <span class="yellow">${d[1]}</span> - <span class="cyan">${d[0]}</span>
+                            </li>`;
+                    });
+                    scanStatus.textContent = data.message;
+                    log(data.message);
+                    attackBtn.disabled = false;
+                })
+                .catch(err => {
+                    log(`Scan error: ${err}`, 'red');
+                    scanStatus.textContent = 'Error';
+                })
+                .finally(() => scanBtn.disabled = false);
+        });
+
+        attackBtn.addEventListener('click', () => {
+            if (statusInterval) clearInterval(statusInterval);
+            attackBtn.disabled = true;
+            attackStatus.textContent = 'Attack in progress...';
+
+            let requestData = { type: attackAllRadio.checked ? 'all' : 'single' };
+            if (requestData.type === 'all') {
+                requestData.devices = Array.from(document.querySelectorAll('#device-list input:checked')).map(cb => devices[cb.value]);
+            } else {
+                requestData.mac = document.getElementById('target-mac').value;
+                requestData.name = document.getElementById('target-name').value;
+            }
+
+            fetch('/attack', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(requestData)
+            })
+            .then(res => res.json())
+            .then(data => {
+                log(data.message);
+                statusInterval = setInterval(() => {
+                    fetch(`/attack_status/${data.session_id}`)
+                        .then(res => res.json())
+                        .then(statusData => {
+                            statusData.logs.forEach(logMsg => log(logMsg));
+                            if (statusData.logs.length > 0) {
+                                clearInterval(statusInterval);
+                                attackStatus.textContent = 'Attack Completed';
+                                attackBtn.disabled = false;
+                            }
+                        });
+                }, 1000);
+            })
+            .catch(err => {
+                log(`Attack error: ${err}`, 'red');
+                attackStatus.textContent = 'Error';
+                attackBtn.disabled = false;
+            });
+        });
+    </script>
+</body>
+</html>
